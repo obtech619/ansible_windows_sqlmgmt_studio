@@ -1,0 +1,49 @@
+---
+
+- name: Validate if SQL Mgmt Studio Exists
+  win_stat:
+    path: "{{ ssms_exe }}"
+  register: ssms_exists
+
+- name: Create SSMS setup directory
+  win_file:
+    path: "{{ ssms_tempdir }}"
+    state: directory
+  when: ssms_exists.stat.exists == false
+
+- name: Download SQL Server Management Studio binary from Artifactory
+  win_get_url:
+    url: "{{ artifactory_url }}{{ ssms_filename }}"
+    dest: "{{ ssms_tempdir }}"
+    validate_certs: no
+    force: yes
+    timeout: 120
+  when: ssms_exists.stat.exists == false
+
+- name: Install SQL Mgmt Studio
+  win_command: '"{{ ssms_filename }}" /install /quiet /norestart /log "{{ ssms_tempdir}}{{ logfile}}"'
+  args:
+    chdir: "{{ ssms_tempdir }}"
+  when: ssms_exists.stat.exists == false
+  register: task
+
+- name: Verify SQL Mgmt Studio install is complete
+  win_wait_for:
+    path: "{{ ssms_tempdir }}{{ logfile }}"
+    search_regex: 'Exit code: 0x0, restarting: No'
+  when: task.changed
+
+- name: Clean up SSMS tempdir
+  win_file:
+    path: "{{ ssms_tempdir }}"
+    state: absent
+  when: task.changed
+
+- name: Reboot the server post SQL Mgmt Studio Install
+  win_reboot:
+  when: task.changed
+
+- name: Wait for system to become reachable over WinRM
+  wait_for_connection:
+    timeout: 300
+  when: task.changed
